@@ -1,13 +1,18 @@
-
-name: Test
+name: Pushover Test
 
 on:
   workflow_dispatch:
 
 jobs:
-  test:
+  notify:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Test
-        run: echo "牛久雨量監視システム テスト成功"
+      - name: Send Pushover notification
+        run: |
+          curl -s \
+            --form-string "token=${{ secrets.PUSHOVER_API_TOKEN }}" \
+            --form-string "user=${{ secrets.PUSHOVER_USER_KEY }}" \
+            --form-string "title=牛久雨量監視システム" \
+            --form-string "message=テスト通知です。GitHub Actionsから正常に送信されました。" \
+            https://api.pushover.net/1/messages.json
