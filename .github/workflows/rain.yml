@@ -1,6 +1,8 @@
 name: Ushiku Rain Monitor
 
 on:
+  schedule:
+    - cron: "*/10 * * * *"
   workflow_dispatch:
 
 jobs:
@@ -25,13 +27,9 @@ jobs:
           data = urllib.request.urlopen(url).read().decode("shift_jis")
           rows = list(csv.reader(io.StringIO(data)))
 
-          # ヘッダー
           header = rows[0]
-
-          # 「現在値(mm)」の列を探す
           rain_index = header.index("現在値(mm)")
 
-          # 牛久（観測所番号45291）を探す
           ushiku = None
 
           for row in rows[1:]:
@@ -53,7 +51,6 @@ jobs:
           print(f"牛久 {year}/{month}/{day} {hour}:{minute}")
           print(f"1時間降水量: {rain:.1f} mm")
 
-          # 1mm以上ならPushover通知
           if rain >= 1.0:
 
               message = (
