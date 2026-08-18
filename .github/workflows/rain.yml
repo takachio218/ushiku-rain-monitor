@@ -25,57 +25,35 @@ jobs:
           data = urllib.request.urlopen(url).read().decode("shift_jis")
           rows = list(csv.reader(io.StringIO(data)))
 
-          # ヘッダーを表示
-          print("CSVヘッダー:")
-          print(rows[0])
+          # ヘッダー
+          header = rows[0]
 
-          # 牛久を探す
+          # 「現在値(mm)」の列を探す
+          rain_index = header.index("現在値(mm)")
+
+          # 牛久（観測所番号45291）を探す
           ushiku = None
 
-          for row in rows:
-              if len(row) > 0 and row[0] == "45291":
+          for row in rows[1:]:
+              if row[0] == "45291":
                   ushiku = row
                   break
 
           if ushiku is None:
               raise Exception("牛久（観測所番号45291）が見つかりません")
 
-          print("牛久データ:")
-          print(ushiku)
-
-          # CSVの項目名から「1時間降水量」の列を探す
-          header = rows[0]
-
-          rain_index = None
-
-          for i, name in enumerate(header):
-              if "1時間降水量" in name:
-                  rain_index = i
-                  print(f"1時間降水量の列番号: {i}")
-                  break
-
-          if rain_index is None:
-              raise Exception("1時間降水量の項目が見つかりません")
-
-          # 時刻
           year = ushiku[4]
           month = ushiku[5]
           day = ushiku[6]
           hour = ushiku[7]
           minute = ushiku[8]
 
-          rain_1h = ushiku[rain_index]
+          rain = float(ushiku[rain_index])
 
           print(f"牛久 {year}/{month}/{day} {hour}:{minute}")
-          print(f"1時間降水量: {rain_1h} mm")
+          print(f"1時間降水量: {rain:.1f} mm")
 
-          if rain_1h == "":
-              print("雨量データなし")
-              raise SystemExit(0)
-
-          rain = float(rain_1h)
-
-          # 1mm以上なら通知
+          # 1mm以上ならPushover通知
           if rain >= 1.0:
 
               message = (
@@ -83,7 +61,7 @@ jobs:
                   f"観測時刻：{year}/{month}/{day} {hour}:{minute}"
               )
 
-              subprocess.run([
+              result = subprocess.run([
                   "curl", "-s",
                   "--form-string",
                   f"token={os.environ['PUSHOVER_API_TOKEN']}",
@@ -94,7 +72,12 @@ jobs:
                   "--form-string",
                   f"message={message}",
                   "https://api.pushover.net/1/messages.json"
-              ], check=True)
+              ], capture_output=True, text=True)
+
+              print("Pushover API:", result.stdout)
+
+              if result.returncode != 0:
+                  raise Exception("Pushover送信に失敗しました")
 
               print("Pushover通知を送信しました")
 
