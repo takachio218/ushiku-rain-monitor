@@ -1,1 +1,26 @@
+name: Ushiku Rain Monitor
 
+on:
+  workflow_dispatch:
+
+jobs:
+  rain:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get Ushiku rain data
+        run: |
+          python - <<'PY'
+          import csv
+          import io
+          import urllib.request
+
+          url = "https://www.data.jma.go.jp/stats/data/mdrr/temphourly_rct/alltable.csv"
+
+          data = urllib.request.urlopen(url).read().decode("shift_jis")
+          rows = list(csv.reader(io.StringIO(data)))
+
+          for row in rows:
+              if any("牛久" in cell for cell in row):
+                  print(row)
+          PY
