@@ -8,19 +8,66 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Get Ushiku rain data
+      - name: Check Ushiku rain
+        env:
+          PUSHOVER_USER_KEY: ${{ secrets.PUSHOVER_USER_KEY }}
+          PUSHOVER_API_TOKEN: ${{ secrets.PUSHOVER_API_TOKEN }}
         run: |
           python - <<'PY'
           import csv
           import io
           import urllib.request
+          import os
+          import subprocess
 
           url = "https://www.data.jma.go.jp/stats/data/mdrr/pre_rct/alltable/pre1h00_rct.csv"
 
           data = urllib.request.urlopen(url).read().decode("shift_jis")
           rows = list(csv.reader(io.StringIO(data)))
 
+          ushiku = None
+
           for row in rows:
-              if any("牛久" in cell for cell in row):
-                  print(row)
+              if len(row) >= 18 and row[0] == "45291":
+                  ushiku = row
+                  break
+
+          if ushiku is None:
+              raise Exception("牛久（観測所番号45291）が見つかりません")
+
+          year = ushiku[4]
+          month = ushiku[5]
+          day = ushiku[6]
+          hour = ushiku[7]
+          minute = ushiku[8]
+
+          rain_1h = ushiku[17]
+
+          print(f"牛久 {year}/{month}/{day} {hour}:{minute}")
+          print(f"1時間降水量: {rain_1h} mm")
+
+          if rain_1h == "":
+              print("雨量データなし")
+              raise SystemExit(0)
+
+          rain = float(rain_1h)
+
+          if rain >= 1.0:
+              message = (
+                  f"牛久の1時間降水量：{rain:.1f} mm\n"
+                  f"観測時刻：{year}/{month}/{day} {hour}:{minute}"
+              )
+
+              subprocess.run([
+                  "curl", "-s",
+                  "--form-string", f"token={os.environ['PUSHOVER_API_TOKEN']}",
+                  "--form-string", f"user={os.environ['PUSHOVER_USER_KEY']}",
+                  "--form-string", "title=牛久雨量監視システム",
+                  "--form-string", f"message={message}",
+                  "https://api.pushover.net/1/messages.json"
+              ], check=True)
+
+              print("Pushover通知を送信しました")
+          else:
+              print("1mm未満なので通知しません")
           PY
