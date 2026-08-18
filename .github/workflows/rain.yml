@@ -5,11 +5,17 @@ on:
     - cron: "*/10 * * * *"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   rain:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Check Ushiku rain
         env:
           PUSHOVER_USER_KEY: ${{ secrets.PUSHOVER_USER_KEY }}
@@ -21,6 +27,7 @@ jobs:
           import urllib.request
           import os
           import subprocess
+          import json
 
           url = "https://www.data.jma.go.jp/stats/data/mdrr/pre_rct/alltable/pre1h00_rct.csv"
 
@@ -51,9 +58,52 @@ jobs:
           print(f"牛久 {year}/{month}/{day} {hour}:{minute}")
           print(f"1時間降水量: {rain:.1f} mm")
 
-          if rain >= 1.0:
+          # 雨量によるレベル判定
+          if rain >= 50:
+              level = 4
+              level_name = "🚨🚨 警戒"
+          elif rain >= 30:
+              level = 3
+              level_name = "🚨 非常に強い雨"
+          elif rain >= 10:
+              level = 2
+              level_name = "⚠️ 強い雨"
+          elif rain >= 1:
+              level = 1
+              level_name = "🌧️ 雨"
+          else:
+              level = 0
+              level_name = "雨なし"
+
+          print(f"現在レベル: {level} ({level_name})")
+
+          # 前回通知レベルを保存するファイル
+          state_file = "rain_state.json"
+
+          if os.path.exists(state_file):
+              with open(state_file, "r") as f:
+                  state = json.load(f)
+              previous_level = state.get("level", 0)
+          else:
+              previous_level = 0
+
+          print(f"前回通知レベル: {previous_level}")
+
+          # 雨が1mm未満になったら状態をリセット
+          if level == 0:
+              if previous_level != 0:
+                  print("雨が止んだため通知状態をリセットします")
+
+              state = {"level": 0}
+
+              with open(state_file, "w") as f:
+                  json.dump(state, f)
+
+          # 雨量レベルが上がった場合だけ通知
+          elif level > previous_level:
 
               message = (
+                  f"{level_name}\n"
                   f"牛久の1時間降水量：{rain:.1f} mm\n"
                   f"観測時刻：{year}/{month}/{day} {hour}:{minute}"
               )
@@ -76,9 +126,28 @@ jobs:
               if result.returncode != 0:
                   raise Exception("Pushover送信に失敗しました")
 
-              print("Pushover通知を送信しました")
+              print("レベル上昇 → Pushover通知を送信しました")
+
+              state = {"level": level}
+
+              with open(state_file, "w") as f:
+                  json.dump(state, f)
 
           else:
-              print("1mm未満なので通知しません")
+              print("レベル変化なし → 通知しません")
 
           PY
+
+      - name: Save rain state
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+          git add rain_state.json
+
+          if git diff --cached --quiet; then
+            echo "状態変更なし"
+          else
+            git commit -m "Update rain monitoring state"
+            git push
+          fi
