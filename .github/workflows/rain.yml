@@ -1,188 +1,214 @@
-import csv
-import io
-import urllib.request
-import os
-import subprocess
-import json
+name: 牛久雨量監視システム
 
-# 気象庁の1時間降水量データ
-url = "https://www.data.jma.go.jp/stats/data/mdrr/pre_rct/alltable/pre1h00_rct.csv"
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
 
-data = urllib.request.urlopen(url).read().decode("shift_jis")
-rows = list(csv.reader(io.StringIO(data)))
+jobs:
+  rain-monitor:
+    runs-on: ubuntu-latest
 
-header = rows[0]
+    permissions:
+      contents: write
 
-# 現在値(mm)の列
-rain_index = header.index("現在値(mm)")
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-# 牛久（観測所番号45291）
-ushiku = None
+      - name: Check rain and notify
+        env:
+          PUSHOVER_USER_KEY: ${{ secrets.PUSHOVER_USER_KEY }}
+          PUSHOVER_API_TOKEN: ${{ secrets.PUSHOVER_API_TOKEN }}
+        run: |
+          python - <<'PY'
+          import csv
+          import io
+          import urllib.request
+          import os
+          import subprocess
+          import json
 
-for row in rows[1:]:
-    if row[0] == "45291":
-        ushiku = row
-        break
+          # 気象庁の1時間降水量データ
+          url = "https://www.data.jma.go.jp/stats/data/mdrr/pre_rct/alltable/pre1h00_rct.csv"
 
-if ushiku is None:
-    raise Exception("牛久（観測所番号45291）が見つかりません")
+          data = urllib.request.urlopen(url).read().decode("shift_jis")
+          rows = list(csv.reader(io.StringIO(data)))
 
-# 観測時刻
-year = ushiku[4]
-month = ushiku[5]
-day = ushiku[6]
-hour = ushiku[7]
-minute = ushiku[8]
+          header = rows[0]
 
-# 1時間降水量
-rain = float(ushiku[rain_index])
+          # 現在値(mm)の列
+          rain_index = header.index("現在値(mm)")
 
-print(f"牛久 {year}/{month}/{day} {hour}:{minute}")
-print(f"1時間降水量: {rain:.1f} mm")
+          # 牛久（観測所番号45291）
+          ushiku = None
 
-# -----------------------------
-# 雨量レベル
-# -----------------------------
+          for row in rows[1:]:
+              if row[0] == "45291":
+                  ushiku = row
+                  break
 
-if rain >= 50:
-    level = 5
-    level_name = "🚨🚨 警戒"
+          if ushiku is None:
+              raise Exception("牛久（観測所番号45291）が見つかりません")
 
-elif rain >= 30:
-    level = 4
-    level_name = "🚨 非常に強い雨"
+          # 観測時刻
+          year = ushiku[4]
+          month = ushiku[5]
+          day = ushiku[6]
+          hour = ushiku[7]
+          minute = ushiku[8]
 
-elif rain >= 10:
-    level = 3
-    level_name = "⚠️ 強い雨"
+          # 1時間降水量
+          rain = float(ushiku[rain_index])
 
-elif rain >= 5:
-    level = 2
-    level_name = "🌧️🌧️ やや強い雨"
+          print(f"牛久 {year}/{month}/{day} {hour}:{minute}")
+          print(f"1時間降水量: {rain:.1f} mm")
 
-elif rain >= 1:
-    level = 1
-    level_name = "🌧️ 雨"
+          # -----------------------------
+          # 雨量レベル
+          # -----------------------------
 
-else:
-    level = 0
-    level_name = "雨なし"
+          if rain >= 50:
+              level = 5
+              level_name = "🚨🚨 警戒"
 
-print(f"現在レベル: {level} ({level_name})")
+          elif rain >= 30:
+              level = 4
+              level_name = "🚨 非常に強い雨"
 
-# -----------------------------
-# 前回状態を読み込む
-# -----------------------------
+          elif rain >= 10:
+              level = 3
+              level_name = "⚠️ 強い雨"
 
-state_file = "rain_state.json"
+          elif rain >= 5:
+              level = 2
+              level_name = "🌧️🌧️ やや強い雨"
 
-if os.path.exists(state_file):
+          elif rain >= 1:
+              level = 1
+              level_name = "🌧️ 雨"
 
-    with open(state_file, "r") as f:
-        state = json.load(f)
+          else:
+              level = 0
+              level_name = "雨なし"
 
-    previous_level = state.get("level", 0)
+          print(f"現在レベル: {level} ({level_name})")
 
-else:
-    previous_level = 0
+          # -----------------------------
+          # 前回状態を読み込む
+          # -----------------------------
 
-print(f"前回レベル: {previous_level}")
+          state_file = "rain_state.json"
 
-# -----------------------------
-# 通知判定
-# -----------------------------
+          if os.path.exists(state_file):
 
-if level == 0:
+              with open(state_file, "r") as f:
+                  state = json.load(f)
 
-    if previous_level != 0:
-        print("雨が止んだため状態をリセットします")
+              previous_level = state.get("level", 0)
 
-    state = {"level": 0}
+          else:
+              previous_level = 0
 
-elif level > previous_level:
+          print(f"前回レベル: {previous_level}")
 
-    message = (
-        f"{level_name}\n"
-        f"牛久の1時間降水量：{rain:.1f} mm\n"
-        f"観測時刻：{year}/{month}/{day} {hour}:{minute}"
-    )
+          # -----------------------------
+          # 通知判定
+          # -----------------------------
 
-    result = subprocess.run([
-        "curl", "-s",
-        "--form-string",
-        f"token={os.environ['PUSHOVER_API_TOKEN']}",
-        "--form-string",
-        f"user={os.environ['PUSHOVER_USER_KEY']}",
-        "--form-string",
-        "title=牛久雨量監視システム",
-        "--form-string",
-        f"message={message}",
-        "https://api.pushover.net/1/messages.json"
-    ], capture_output=True, text=True)
+          if level == 0:
 
-    print("Pushover API:", result.stdout)
+              if previous_level != 0:
+                  print("雨が止んだため状態をリセットします")
 
-    if result.returncode != 0:
-        raise Exception("Pushover送信に失敗しました")
+              state = {"level": 0}
 
-    print("レベル上昇 → Pushover通知を送信しました")
+          elif level > previous_level:
 
-    state = {"level": level}
+              message = (
+                  f"{level_name}\n"
+                  f"牛久の1時間降水量：{rain:.1f} mm\n"
+                  f"観測時刻：{year}/{month}/{day} {hour}:{minute}"
+              )
 
-else:
+              result = subprocess.run([
+                  "curl", "-s",
+                  "--form-string",
+                  f"token={os.environ['PUSHOVER_API_TOKEN']}",
+                  "--form-string",
+                  f"user={os.environ['PUSHOVER_USER_KEY']}",
+                  "--form-string",
+                  "title=牛久雨量監視システム",
+                  "--form-string",
+                  f"message={message}",
+                  "https://api.pushover.net/1/messages.json"
+              ], capture_output=True, text=True)
 
-    print("レベル変化なし → 通知しません")
+              print("Pushover API:", result.stdout)
 
-    state = {"level": previous_level}
+              if result.returncode != 0:
+                  raise Exception("Pushover送信に失敗しました")
 
-# -----------------------------
-# 状態ファイルを保存
-# -----------------------------
+              print("レベル上昇 → Pushover通知を送信しました")
 
-with open(state_file, "w") as f:
-    json.dump(state, f)
+              state = {"level": level}
 
-# -----------------------------
-# GitHubへ状態を保存
-# -----------------------------
+          else:
 
-subprocess.run([
-    "git", "config",
-    "user.name",
-    "github-actions"
-], check=True)
+              print("レベル変化なし → 通知しません")
 
-subprocess.run([
-    "git", "config",
-    "user.email",
-    "41898282+github-actions[bot]@users.noreply.github.com"
-], check=True)
+              state = {"level": previous_level}
 
-subprocess.run([
-    "git", "add",
-    "rain_state.json"
-], check=True)
+          # -----------------------------
+          # 状態ファイルを保存
+          # -----------------------------
 
-result = subprocess.run([
-    "git", "diff",
-    "--cached",
-    "--quiet"
-])
+          with open(state_file, "w") as f:
+              json.dump(state, f)
 
-if result.returncode != 0:
+          # -----------------------------
+          # GitHubへ状態を保存
+          # -----------------------------
 
-    subprocess.run([
-        "git", "commit",
-        "-m",
-        "Update rain state"
-    ], check=True)
+          subprocess.run([
+              "git", "config",
+              "user.name",
+              "github-actions"
+          ], check=True)
 
-    subprocess.run([
-        "git", "push"
-    ], check=True)
+          subprocess.run([
+              "git", "config",
+              "user.email",
+              "41898282+github-actions[bot]@users.noreply.github.com"
+          ], check=True)
 
-    print("雨量状態をGitHubへ保存しました")
+          subprocess.run([
+              "git", "add",
+              "rain_state.json"
+          ], check=True)
 
-else:
+          result = subprocess.run([
+              "git", "diff",
+              "--cached",
+              "--quiet"
+          ])
 
-    print("状態変更なし")
+          if result.returncode != 0:
+
+              subprocess.run([
+                  "git", "commit",
+                  "-m",
+                  "Update rain state"
+              ], check=True)
+
+              subprocess.run([
+                  "git", "push"
+              ], check=True)
+
+              print("雨量状態をGitHubへ保存しました")
+
+          else:
+
+              print("状態変更なし")
+
+          PY
