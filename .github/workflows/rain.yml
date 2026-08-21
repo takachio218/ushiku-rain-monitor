@@ -1,4 +1,4 @@
-name: 牛久雨量監視システム
+name: 牛久・千葉 雨量監視システム
 
 on:
   schedule:
@@ -29,10 +29,6 @@ jobs:
           import subprocess
           import json
 
-          # =================================
-          # 気象庁の1時間降水量データ
-          # =================================
-
           url = "https://www.data.jma.go.jp/stats/data/mdrr/pre_rct/alltable/pre1h00_rct.csv"
 
           data = urllib.request.urlopen(url).read().decode("shift_jis")
@@ -41,19 +37,63 @@ jobs:
           header = rows[0]
           rain_index = header.index("現在値(mm)")
 
-          # =================================
-          # 観測地点
-          # =================================
-
+          # 監視する観測所
           stations = {
-              "牛久": "45291",
-              "千葉": "45212"
+              "45291": "牛久",
+              "45212": "千葉"
           }
 
-          # =================================
-          # 状態ファイル
-          # =================================
+          results = {}
 
+          for station_id, station_name in stations.items():
+              target = None
+              for row in rows[1:]:
+                  if row[0] == station_id:
+                      target = row
+                      break
+
+              if target is None:
+                  print(f"{station_name}（{station_id}）が見つかりません")
+                  continue
+
+              year = target[4]
+              month = target[5]
+              day = target[6]
+              hour = target[7]
+              minute = target[8]
+              rain = float(target[rain_index])
+
+              print(f"{station_name} {year}/{month}/{day} {hour}:{minute}  1時間降水量: {rain:.1f} mm")
+
+              # 雨量レベル判定
+              if rain >= 50:
+                  level = 5
+                  level_name = "🚨🚨 警戒"
+              elif rain >= 30:
+                  level = 4
+                  level_name = "🚨 非常に強い雨"
+              elif rain >= 10:
+                  level = 3
+                  level_name = "⚠️ 強い雨"
+              elif rain >= 5:
+                  level = 2
+                  level_name = "🌧️🌧️ やや強い雨"
+              elif rain >= 1:
+                  level = 1
+                  level_name = "🌧️ 雨"
+              else:
+                  level = 0
+                  level_name = "雨なし"
+
+              results[station_id] = {
+                  "name": station_name,
+                  "rain": rain,
+                  "level": level,
+                  "level_name": level_name,
+                  "time": f"{year}/{month}/{day} {hour}:{minute}"
+              }
+
+          # 前回状態を読み込む
           state_file = "rain_state.json"
 
           if os.path.exists(state_file):
@@ -62,210 +102,60 @@ jobs:
           else:
               state = {}
 
-          # =================================
-          # 各観測地点を確認
-          # =================================
+          # 通知判定
+          new_state = {}
+          notified = False
 
-          for station_name, station_number in stations.items():
+          for station_id, info in results.items():
+              previous_level = state.get(station_id, 0)
+              current_level = info["level"]
 
-              station = None
+              print(f"{info['name']} 前回レベル: {previous_level} → 現在レベル: {current_level}")
 
-              for row in rows[1:]:
-                  if row[0] == station_number:
-                      station = row
-                      break
-
-              if station is None:
-                  raise Exception(
-                      f"{station_name}（観測所番号{station_number}）が見つかりません"
-                  )
-
-              # -----------------------------
-              # 観測時刻
-              # -----------------------------
-
-              year = station[4]
-              month = station[5]
-              day = station[6]
-              hour = station[7]
-              minute = station[8]
-
-              # -----------------------------
-              # 1時間降水量
-              # -----------------------------
-
-              rain = float(station[rain_index])
-
-              print("--------------------------------")
-              print(
-                  f"{station_name} "
-                  f"{year}/{month}/{day} {hour}:{minute}"
-              )
-              print(f"1時間降水量: {rain:.1f} mm")
-
-              # =================================
-              # 雨量レベル
-              # =================================
-
-              if rain >= 50:
-                  level = 5
-                  level_name = "🚨🚨 警戒"
-
-              elif rain >= 30:
-                  level = 4
-                  level_name = "🚨 非常に強い雨"
-
-              elif rain >= 10:
-                  level = 3
-                  level_name = "⚠️ 強い雨"
-
-              elif rain >= 5:
-                  level = 2
-                  level_name = "🌧️🌧️ やや強い雨"
-
-              elif rain >= 1:
-                  level = 1
-                  level_name = "🌧️ 雨"
-
-              else:
-                  level = 0
-                  level_name = "雨なし"
-
-              print(
-                  f"{station_name} 現在レベル: "
-                  f"{level} ({level_name})"
-              )
-
-              # =================================
-              # 前回レベル
-              # =================================
-
-              previous_level = state.get(station_name, 0)
-
-              print(
-                  f"{station_name} 前回レベル: "
-                  f"{previous_level}"
-              )
-
-              # =================================
-              # 通知判定
-              # =================================
-
-              if level == 0:
-
-                  if previous_level != 0:
-                      print(
-                          f"{station_name}：雨が止んだため"
-                          "状態をリセットします"
-                      )
-
-                  state[station_name] = 0
-
-              elif level > previous_level:
-
-                  # ---------------------------------
-                  # 地点名を通知の先頭に表示
-                  # ---------------------------------
-
+              if current_level == 0:
+                  new_state[station_id] = 0
+              elif current_level > previous_level:
                   message = (
-                      f"📍【{station_name}】\n"
-                      f"{level_name}\n"
-                      f"1時間降水量：{rain:.1f} mm\n"
-                      f"観測時刻："
-                      f"{year}/{month}/{day} {hour}:{minute}"
+                      f"{info['level_name']}\n"
+                      f"{info['name']}の1時間降水量：{info['rain']:.1f} mm\n"
+                      f"観測時刻：{info['time']}"
                   )
 
                   result = subprocess.run([
                       "curl", "-s",
-                      "--form-string",
-                      f"token={os.environ['PUSHOVER_API_TOKEN']}",
-                      "--form-string",
-                      f"user={os.environ['PUSHOVER_USER_KEY']}",
-                      "--form-string",
-                      "title=千葉・牛久雨量監視システム",
-                      "--form-string",
-                      f"message={message}",
+                      "--form-string", f"token={os.environ['PUSHOVER_API_TOKEN']}",
+                      "--form-string", f"user={os.environ['PUSHOVER_USER_KEY']}",
+                      "--form-string", "title=牛久・千葉 雨量監視",
+                      "--form-string", f"message={message}",
                       "https://api.pushover.net/1/messages.json"
                   ], capture_output=True, text=True)
 
                   print("Pushover API:", result.stdout)
 
                   if result.returncode != 0:
-                      raise Exception(
-                          f"{station_name}のPushover送信に失敗しました"
-                      )
+                      raise Exception("Pushover送信に失敗しました")
 
-                  print(
-                      f"{station_name}：レベル上昇 → "
-                      "Pushover通知を送信しました"
-                  )
-
-                  state[station_name] = level
-
+                  print(f"{info['name']} レベル上昇 → 通知を送信しました")
+                  new_state[station_id] = current_level
+                  notified = True
               else:
+                  new_state[station_id] = previous_level
 
-                  print(
-                      f"{station_name}：レベル変化なし → "
-                      "通知しません"
-                  )
-
-                  state[station_name] = previous_level
-
-          # =================================
-          # 状態ファイル保存
-          # =================================
-
+          # 状態を保存
           with open(state_file, "w") as f:
-              json.dump(
-                  state,
-                  f,
-                  ensure_ascii=False,
-                  indent=2
-              )
+              json.dump(new_state, f)
 
-          # =================================
           # GitHubへ状態を保存
-          # =================================
+          subprocess.run(["git", "config", "user.name", "github-actions"], check=True)
+          subprocess.run(["git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"], check=True)
+          subprocess.run(["git", "add", "rain_state.json"], check=True)
 
-          subprocess.run([
-              "git", "config",
-              "user.name",
-              "github-actions"
-          ], check=True)
-
-          subprocess.run([
-              "git", "config",
-              "user.email",
-              "41898282+github-actions[bot]@users.noreply.github.com"
-          ], check=True)
-
-          subprocess.run([
-              "git", "add",
-              "rain_state.json"
-          ], check=True)
-
-          result = subprocess.run([
-              "git", "diff",
-              "--cached",
-              "--quiet"
-          ])
-
+          result = subprocess.run(["git", "diff", "--cached", "--quiet"])
           if result.returncode != 0:
-
-              subprocess.run([
-                  "git", "commit",
-                  "-m",
-                  "Update rain state"
-              ], check=True)
-
-              subprocess.run([
-                  "git", "push"
-              ], check=True)
-
+              subprocess.run(["git", "commit", "-m", "Update rain state"], check=True)
+              subprocess.run(["git", "push"], check=True)
               print("雨量状態をGitHubへ保存しました")
-
           else:
-
               print("状態変更なし")
 
           PY
