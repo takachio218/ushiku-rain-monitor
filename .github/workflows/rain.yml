@@ -29,146 +29,203 @@ jobs:
           import subprocess
           import json
 
+          # =================================
           # 気象庁の1時間降水量データ
+          # =================================
+
           url = "https://www.data.jma.go.jp/stats/data/mdrr/pre_rct/alltable/pre1h00_rct.csv"
 
           data = urllib.request.urlopen(url).read().decode("shift_jis")
           rows = list(csv.reader(io.StringIO(data)))
 
           header = rows[0]
-
-          # 現在値(mm)の列
           rain_index = header.index("現在値(mm)")
 
-          # 牛久（観測所番号45291）
-          ushiku = None
+          # =================================
+          # 観測地点
+          # =================================
 
-          for row in rows[1:]:
-              if row[0] == "45291":
-                  ushiku = row
-                  break
+          stations = {
+              "牛久": "45291",
+              "千葉": "45212"
+          }
 
-          if ushiku is None:
-              raise Exception("牛久（観測所番号45291）が見つかりません")
-
-          # 観測時刻
-          year = ushiku[4]
-          month = ushiku[5]
-          day = ushiku[6]
-          hour = ushiku[7]
-          minute = ushiku[8]
-
-          # 1時間降水量
-          rain = float(ushiku[rain_index])
-
-          print(f"牛久 {year}/{month}/{day} {hour}:{minute}")
-          print(f"1時間降水量: {rain:.1f} mm")
-
-          # -----------------------------
-          # 雨量レベル
-          # -----------------------------
-
-          if rain >= 50:
-              level = 5
-              level_name = "🚨🚨 警戒"
-
-          elif rain >= 30:
-              level = 4
-              level_name = "🚨 非常に強い雨"
-
-          elif rain >= 10:
-              level = 3
-              level_name = "⚠️ 強い雨"
-
-          elif rain >= 5:
-              level = 2
-              level_name = "🌧️🌧️ やや強い雨"
-
-          elif rain >= 1:
-              level = 1
-              level_name = "🌧️ 雨"
-
-          else:
-              level = 0
-              level_name = "雨なし"
-
-          print(f"現在レベル: {level} ({level_name})")
-
-          # -----------------------------
-          # 前回状態を読み込む
-          # -----------------------------
+          # =================================
+          # 状態ファイル
+          # =================================
 
           state_file = "rain_state.json"
 
           if os.path.exists(state_file):
-
               with open(state_file, "r") as f:
                   state = json.load(f)
-
-              previous_level = state.get("level", 0)
-
           else:
-              previous_level = 0
+              state = {}
 
-          print(f"前回レベル: {previous_level}")
+          # =================================
+          # 各観測地点を確認
+          # =================================
 
-          # -----------------------------
-          # 通知判定
-          # -----------------------------
+          for station_name, station_number in stations.items():
 
-          if level == 0:
+              station = None
 
-              if previous_level != 0:
-                  print("雨が止んだため状態をリセットします")
+              for row in rows[1:]:
+                  if row[0] == station_number:
+                      station = row
+                      break
 
-              state = {"level": 0}
+              if station is None:
+                  raise Exception(
+                      f"{station_name}（観測所番号{station_number}）が見つかりません"
+                  )
 
-          elif level > previous_level:
+              # -----------------------------
+              # 観測時刻
+              # -----------------------------
 
-              message = (
-                  f"{level_name}\n"
-                  f"牛久の1時間降水量：{rain:.1f} mm\n"
-                  f"観測時刻：{year}/{month}/{day} {hour}:{minute}"
+              year = station[4]
+              month = station[5]
+              day = station[6]
+              hour = station[7]
+              minute = station[8]
+
+              # -----------------------------
+              # 1時間降水量
+              # -----------------------------
+
+              rain = float(station[rain_index])
+
+              print("--------------------------------")
+              print(
+                  f"{station_name} "
+                  f"{year}/{month}/{day} {hour}:{minute}"
+              )
+              print(f"1時間降水量: {rain:.1f} mm")
+
+              # =================================
+              # 雨量レベル
+              # =================================
+
+              if rain >= 50:
+                  level = 5
+                  level_name = "🚨🚨 警戒"
+
+              elif rain >= 30:
+                  level = 4
+                  level_name = "🚨 非常に強い雨"
+
+              elif rain >= 10:
+                  level = 3
+                  level_name = "⚠️ 強い雨"
+
+              elif rain >= 5:
+                  level = 2
+                  level_name = "🌧️🌧️ やや強い雨"
+
+              elif rain >= 1:
+                  level = 1
+                  level_name = "🌧️ 雨"
+
+              else:
+                  level = 0
+                  level_name = "雨なし"
+
+              print(
+                  f"{station_name} 現在レベル: "
+                  f"{level} ({level_name})"
               )
 
-              result = subprocess.run([
-                  "curl", "-s",
-                  "--form-string",
-                  f"token={os.environ['PUSHOVER_API_TOKEN']}",
-                  "--form-string",
-                  f"user={os.environ['PUSHOVER_USER_KEY']}",
-                  "--form-string",
-                  "title=牛久雨量監視システム",
-                  "--form-string",
-                  f"message={message}",
-                  "https://api.pushover.net/1/messages.json"
-              ], capture_output=True, text=True)
+              # =================================
+              # 前回レベル
+              # =================================
 
-              print("Pushover API:", result.stdout)
+              previous_level = state.get(station_name, 0)
 
-              if result.returncode != 0:
-                  raise Exception("Pushover送信に失敗しました")
+              print(
+                  f"{station_name} 前回レベル: "
+                  f"{previous_level}"
+              )
 
-              print("レベル上昇 → Pushover通知を送信しました")
+              # =================================
+              # 通知判定
+              # =================================
 
-              state = {"level": level}
+              if level == 0:
 
-          else:
+                  if previous_level != 0:
+                      print(
+                          f"{station_name}：雨が止んだため"
+                          "状態をリセットします"
+                      )
 
-              print("レベル変化なし → 通知しません")
+                  state[station_name] = 0
 
-              state = {"level": previous_level}
+              elif level > previous_level:
 
-          # -----------------------------
-          # 状態ファイルを保存
-          # -----------------------------
+                  # ---------------------------------
+                  # 地点名を通知の先頭に表示
+                  # ---------------------------------
+
+                  message = (
+                      f"📍【{station_name}】\n"
+                      f"{level_name}\n"
+                      f"1時間降水量：{rain:.1f} mm\n"
+                      f"観測時刻："
+                      f"{year}/{month}/{day} {hour}:{minute}"
+                  )
+
+                  result = subprocess.run([
+                      "curl", "-s",
+                      "--form-string",
+                      f"token={os.environ['PUSHOVER_API_TOKEN']}",
+                      "--form-string",
+                      f"user={os.environ['PUSHOVER_USER_KEY']}",
+                      "--form-string",
+                      "title=千葉・牛久雨量監視システム",
+                      "--form-string",
+                      f"message={message}",
+                      "https://api.pushover.net/1/messages.json"
+                  ], capture_output=True, text=True)
+
+                  print("Pushover API:", result.stdout)
+
+                  if result.returncode != 0:
+                      raise Exception(
+                          f"{station_name}のPushover送信に失敗しました"
+                      )
+
+                  print(
+                      f"{station_name}：レベル上昇 → "
+                      "Pushover通知を送信しました"
+                  )
+
+                  state[station_name] = level
+
+              else:
+
+                  print(
+                      f"{station_name}：レベル変化なし → "
+                      "通知しません"
+                  )
+
+                  state[station_name] = previous_level
+
+          # =================================
+          # 状態ファイル保存
+          # =================================
 
           with open(state_file, "w") as f:
-              json.dump(state, f)
+              json.dump(
+                  state,
+                  f,
+                  ensure_ascii=False,
+                  indent=2
+              )
 
-          # -----------------------------
+          # =================================
           # GitHubへ状態を保存
-          # -----------------------------
+          # =================================
 
           subprocess.run([
               "git", "config",
