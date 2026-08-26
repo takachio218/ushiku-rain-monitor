@@ -1,506 +1,530 @@
-import json
-import os
-import subprocess
-import urllib.request
-from datetime import datetime
+name: 牛久・千葉 Rain Combine
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: rain-combine
+  cancel-in-progress: false
+
+jobs:
+  rain-combine:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check rain and notify
+        env:
+          PUSHOVER_USER_KEY: ${{ secrets.PUSHOVER_USER_KEY }}
+          PUSHOVER_API_TOKEN: ${{ secrets.PUSHOVER_API_TOKEN }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          import urllib.request
+          from datetime import datetime
+
+          # ============================================================
+          # 気象庁アメダス 10分観測データ
+          # ============================================================
+
+          latest_time_url = (
+              "https://www.jma.go.jp/bosai/amedas/data/latest_time.txt"
+          )
+
+          latest_time_raw = urllib.request.urlopen(
+              latest_time_url,
+              timeout=20
+          ).read().decode("utf-8").strip()
+
+          # latest_time.txt は
+          # 2026-08-27T07:40:00+09:00
+          # の形式になっているため、
+          # アメダスmap JSON用の YYYYMMDDHHMMSS に変換する
+
+          latest_dt = datetime.fromisoformat(
+              latest_time_raw
+          )
+
+          latest_time = latest_dt.strftime(
+              "%Y%m%d%H%M%S"
+          )
+
+          print(
+              f"気象庁アメダス最新観測時刻: "
+              f"{latest_dt.strftime('%Y/%m/%d %H:%M')}"
+          )
+
+          print(
+              f"アメダスデータ時刻: {latest_time}"
+          )
+
+          map_url = (
+              "https://www.jma.go.jp/bosai/amedas/data/map/"
+              + latest_time
+              + ".json"
+          )
+
+          print(f"アメダスデータ取得: {map_url}")
+
+          amedas_data = json.loads(
+              urllib.request.urlopen(
+                  map_url,
+                  timeout=20
+              ).read().decode("utf-8")
+          )
+
+          # ============================================================
+          # 監視する観測所
+          # ============================================================
+
+          stations = {
+              "45291": "牛久",
+              "45212": "千葉"
+          }
+
+          # ============================================================
+          # 10分間降水量を取得
+          # ============================================================
+
+          results = {}
+
+          for station_id, station_name in stations.items():
 
-# ============================================================
-# 気象庁アメダス 10分観測データ
-# ============================================================
+              if station_id not in amedas_data:
+                  print(
+                      f"{station_name}（{station_id}）が"
+                      "アメダスデータに見つかりません"
+                  )
+                  continue
+
+              station = amedas_data[station_id]
 
-latest_time_url = (
-    "https://www.jma.go.jp/bosai/amedas/data/latest_time.txt"
-)
-
-latest_time_raw = urllib.request.urlopen(
-    latest_time_url,
-    timeout=20
-).read().decode("utf-8").strip()
-
-# 気象庁の latest_time.txt は
-# 2026-08-27T07:40:00+09:00
-# のようなISO形式を返すため、
-# アメダスmap用の YYYYMMDDHHMMSS に変換する
-
-latest_dt = datetime.fromisoformat(latest_time_raw)
-
-latest_time = latest_dt.strftime("%Y%m%d%H%M%S")
-
-print(
-    "気象庁アメダス最新観測時刻:",
-    latest_dt.strftime("%Y/%m/%d %H:%M")
-)
-
-map_url = (
-    "https://www.jma.go.jp/bosai/amedas/data/map/"
-    + latest_time
-    + ".json"
-)
-
-print(f"アメダスデータ取得: {map_url}")
-
-amedas_data = json.loads(
-    urllib.request.urlopen(
-        map_url,
-        timeout=20
-    ).read().decode("utf-8")
-)
-
-# ============================================================
-# 監視する観測所
-# ============================================================
-
-stations = {
-    "45291": "牛久",
-    "45212": "千葉"
-}
-
-# ============================================================
-# 10分間降水量を取得
-# ============================================================
-
-results = {}
-
-for station_id, station_name in stations.items():
-
-    if station_id not in amedas_data:
-        print(
-            f"{station_name}（{station_id}）が"
-            "アメダスデータに見つかりません"
-        )
-        continue
-
-    station = amedas_data[station_id]
-
-    # --------------------------------------------------------
-    # 10分間降水量
-    # --------------------------------------------------------
-
-    precipitation10m = station.get("precipitation10m")
-
-    if precipitation10m is None:
-        print(
-            f"{station_name}: precipitation10m がありません"
-        )
-        continue
-
-    rain10 = precipitation10m[0]
-
-    if rain10 is None:
-        rain10 = 0.0
-
-    rain10 = float(rain10)
-
-    # データ品質フラグ
-    quality = precipitation10m[1]
-
-    # ========================================================
-    # 1時間降水量も同じアメダスデータから取得
-    # ========================================================
-
-    precipitation1h = station.get("precipitation1h")
-
-    if precipitation1h is None:
-        rain1h = 0.0
-        quality1h = None
-
-    else:
-        rain1h = precipitation1h[0]
-
-        if rain1h is None:
-            rain1h = 0.0
-
-        rain1h = float(rain1h)
-        quality1h = precipitation1h[1]
-
-    # ========================================================
-    # 観測時刻
-    # ========================================================
-
-    observed_time = latest_dt.strftime(
-        "%Y/%m/%d %H:%M"
-    )
-
-    # ========================================================
-    # 雨量レベル
-    #
-    # 1時間降水量を基準にする
-    # ========================================================
-
-    if rain1h >= 50:
-        level = 5
-        level_name = "🚨🚨 警戒"
-
-    elif rain1h >= 30:
-        level = 4
-        level_name = "🚨 非常に強い雨"
-
-    elif rain1h >= 10:
-        level = 3
-        level_name = "⚠️ 強い雨"
-
-    elif rain1h >= 5:
-        level = 2
-        level_name = "🌧️🌧️ やや強い雨"
-
-    elif rain1h >= 1:
-        level = 1
-        level_name = "🌧️ 雨"
-
-    else:
-        level = 0
-        level_name = "雨なし"
-
-    # ========================================================
-    # 10分間降水量 > 0 なら「雨が降っている」
-    # ========================================================
-
-    is_raining = rain10 > 0.0
-
-    results[station_id] = {
-        "name": station_name,
-        "rain10": rain10,
-        "rain1h": rain1h,
-        "level": level,
-        "level_name": level_name,
-        "is_raining": is_raining,
-        "quality10": quality,
-        "quality1h": quality1h,
-        "time": observed_time
-    }
-
-    print("")
-    print("======================================")
-    print(f"観測点: {station_name}")
-    print(f"観測時刻: {observed_time}")
-    print(f"10分間降水量: {rain10:.1f} mm")
-    print(f"1時間降水量: {rain1h:.1f} mm")
-    print(f"10分品質情報: {quality}")
-    print(f"1時間品質情報: {quality1h}")
-    print(
-        f"雨量レベル: {level} ({level_name})"
-    )
-    print(
-        f"雨の状態: "
-        f"{'降っている' if is_raining else '降っていない'}"
-    )
-    print("======================================")
-
-# ============================================================
-# 状態ファイル
-# ============================================================
-
-state_file = "rain_combine_state.json"
-
-if os.path.exists(state_file):
-
-    try:
-        with open(state_file, "r") as f:
-            state = json.load(f)
-
-    except Exception:
-        print(
-            "状態ファイルを読み込めません。"
-            "初期状態にします。"
-        )
-        state = {}
-
-else:
-    state = {}
-
-new_state = {}
-
-# ============================================================
-# 通知処理
-# ============================================================
-
-for station_id, info in results.items():
-
-    previous = state.get(
-        station_id,
-        {
-            "is_raining": False,
-            "level": 0
-        }
-    )
-
-    previous_raining = previous.get(
-        "is_raining",
-        False
-    )
-
-    previous_level = previous.get(
-        "level",
-        0
-    )
-
-    current_raining = info["is_raining"]
-    current_level = info["level"]
-
-    # --------------------------------------------------------
-    # 雨が降り始めた
-    # --------------------------------------------------------
-
-    rain_started = (
-        current_raining
-        and not previous_raining
-    )
-
-    # --------------------------------------------------------
-    # 雨量レベルが上昇した
-    # --------------------------------------------------------
-
-    level_up = (
-        current_level > previous_level
-    )
-
-    print("")
-    print(
-        f"{info['name']} 状態確認"
-    )
-
-    print(
-        f"前回: "
-        f"雨={'ON' if previous_raining else 'OFF'} "
-        f"レベル={previous_level}"
-    )
-
-    print(
-        f"現在: "
-        f"雨={'ON' if current_raining else 'OFF'} "
-        f"レベル={current_level}"
-    )
-
-    # ========================================================
-    # 通知メッセージを作る
-    # ========================================================
-
-    message_parts = []
-
-    # --------------------------------------------------------
-    # 雨が降り始めた
-    # --------------------------------------------------------
-
-    if rain_started:
-
-        message_parts.append(
-            "☔ 雨の降り始めを検知"
-        )
-
-        message_parts.append(
-            f"{info['name']} "
-            f"10分間降水量：{info['rain10']:.1f} mm"
-        )
-
-    # --------------------------------------------------------
-    # 1時間雨量レベル上昇
-    # --------------------------------------------------------
-
-    if level_up:
-
-        message_parts.append(
-            info["level_name"]
-        )
-
-        message_parts.append(
-            f"{info['name']} "
-            f"1時間降水量：{info['rain1h']:.1f} mm"
-        )
-
-    # ========================================================
-    # 通知が必要な場合
-    # ========================================================
-
-    if message_parts:
-
-        message_parts.append(
-            f"観測時刻：{info['time']}"
-        )
-
-        message = "\n".join(
-            message_parts
-        )
-
-        print("")
-        print("Pushover通知:")
-        print(message)
-
-        result = subprocess.run(
-            [
-                "curl",
-                "-s",
-                "--form-string",
-                f"token={os.environ['PUSHOVER_API_TOKEN']}",
-                "--form-string",
-                f"user={os.environ['PUSHOVER_USER_KEY']}",
-                "--form-string",
-                "title=牛久・千葉 Rain Combine",
-                "--form-string",
-                f"message={message}",
-                "https://api.pushover.net/1/messages.json"
-            ],
-            capture_output=True,
-            text=True
-        )
-
-        print(
-            "Pushover API:",
-            result.stdout
-        )
-
-        if result.returncode != 0:
-            raise Exception(
-                "Pushover送信に失敗しました"
-            )
-
-        print(
-            f"{info['name']} 通知送信成功"
-        )
-
-    else:
-
-        print(
-            f"{info['name']} 通知条件なし"
-        )
-
-    # ========================================================
-    # 雨が止んだ場合
-    # ========================================================
-
-    if (
-        not current_raining
-        and previous_raining
-    ):
-
-        print(
-            f"{info['name']} "
-            "10分間降水量が0になりました。"
-        )
-
-    # ========================================================
-    # 次回用の状態
-    # ========================================================
-
-    new_state[station_id] = {
-        "is_raining": current_raining,
-        "level": current_level,
-        "rain10": info["rain10"],
-        "rain1h": info["rain1h"],
-        "time": info["time"]
-    }
-
-# ============================================================
-# 状態ファイル保存
-# ============================================================
-
-with open(
-    state_file,
-    "w"
-) as f:
-
-    json.dump(
-        new_state,
-        f,
-        ensure_ascii=False,
-        indent=2
-    )
-
-print("")
-print("状態ファイルを保存しました")
-
-# ============================================================
-# Git設定
-# ============================================================
-
-subprocess.run(
-    [
-        "git",
-        "config",
-        "user.name",
-        "github-actions"
-    ],
-    check=True
-)
-
-subprocess.run(
-    [
-        "git",
-        "config",
-        "user.email",
-        "41898282+github-actions[bot]@users.noreply.github.com"
-    ],
-    check=True
-)
-
-# ============================================================
-# 状態ファイルをコミット
-# ============================================================
-
-subprocess.run(
-    [
-        "git",
-        "add",
-        state_file
-    ],
-    check=True
-)
-
-result = subprocess.run(
-    [
-        "git",
-        "diff",
-        "--cached",
-        "--quiet"
-    ]
-)
-
-if result.returncode != 0:
-
-    subprocess.run(
-        [
-            "git",
-            "commit",
-            "-m",
-            "Update rain combine state"
-        ],
-        check=True
-    )
-
-    # --------------------------------------------------------
-    # 他のGitHub Actionsが先にpushしていた場合に備える
-    # --------------------------------------------------------
-
-    print(
-        "GitHubから最新状態を取得します"
-    )
-
-    subprocess.run(
-        [
-            "git",
-            "pull",
-            "--rebase",
-            "origin",
-            "main"
-        ],
-        check=True
-    )
-
-    subprocess.run(
-        [
-            "git",
-            "push",
-            "origin",
-            "main"
-        ],
-        check=True
-    )
-
-    print(
-        "雨量状態をGitHubへ保存しました"
-    )
-
-else:
-
-    print(
-        "状態変更なし"
-    )
+              # precipitation10m
+              precipitation10m = station.get("precipitation10m")
+
+              if precipitation10m is None:
+                  print(
+                      f"{station_name}: precipitation10m がありません"
+                  )
+                  continue
+
+              rain10 = precipitation10m[0]
+
+              if rain10 is None:
+                  rain10 = 0.0
+
+              rain10 = float(rain10)
+
+              # データ品質フラグ
+              quality = precipitation10m[1]
+
+              # ========================================================
+              # 1時間降水量も同じアメダスデータから取得
+              # ========================================================
+
+              precipitation1h = station.get("precipitation1h")
+
+              if precipitation1h is None:
+                  rain1h = 0.0
+                  quality1h = None
+              else:
+                  rain1h = precipitation1h[0]
+
+                  if rain1h is None:
+                      rain1h = 0.0
+
+                  rain1h = float(rain1h)
+                  quality1h = precipitation1h[1]
+
+              # ========================================================
+              # 観測時刻
+              # ========================================================
+
+              dt = datetime.strptime(
+                  latest_time,
+                  "%Y%m%d%H%M%S"
+              )
+
+              observed_time = dt.strftime(
+                  "%Y/%m/%d %H:%M"
+              )
+
+              # ========================================================
+              # 雨量レベル
+              #
+              # 1時間降水量を基準にする
+              # ========================================================
+
+              if rain1h >= 50:
+                  level = 5
+                  level_name = "🚨🚨 警戒"
+
+              elif rain1h >= 30:
+                  level = 4
+                  level_name = "🚨 非常に強い雨"
+
+              elif rain1h >= 10:
+                  level = 3
+                  level_name = "⚠️ 強い雨"
+
+              elif rain1h >= 5:
+                  level = 2
+                  level_name = "🌧️🌧️ やや強い雨"
+
+              elif rain1h >= 1:
+                  level = 1
+                  level_name = "🌧️ 雨"
+
+              else:
+                  level = 0
+                  level_name = "雨なし"
+
+              # ========================================================
+              # 10分間降水量 > 0 なら「雨が降っている」
+              # ========================================================
+
+              is_raining = rain10 > 0.0
+
+              results[station_id] = {
+                  "name": station_name,
+                  "rain10": rain10,
+                  "rain1h": rain1h,
+                  "level": level,
+                  "level_name": level_name,
+                  "is_raining": is_raining,
+                  "quality10": quality,
+                  "quality1h": quality1h,
+                  "time": observed_time
+              }
+
+              print("")
+              print("======================================")
+              print(f"観測点: {station_name}")
+              print(f"観測時刻: {observed_time}")
+              print(f"10分間降水量: {rain10:.1f} mm")
+              print(f"1時間降水量: {rain1h:.1f} mm")
+              print(f"10分品質情報: {quality}")
+              print(f"1時間品質情報: {quality1h}")
+              print(f"雨量レベル: {level} ({level_name})")
+              print(
+                  f"雨の状態: "
+                  f"{'降っている' if is_raining else '降っていない'}"
+              )
+              print("======================================")
+
+          # ============================================================
+          # 状態ファイル
+          # ============================================================
+
+          state_file = "rain_combine_state.json"
+
+          if os.path.exists(state_file):
+
+              try:
+                  with open(state_file, "r") as f:
+                      state = json.load(f)
+              except Exception:
+                  print("状態ファイルを読み込めません。初期状態にします。")
+                  state = {}
+
+          else:
+              state = {}
+
+          new_state = {}
+
+          # ============================================================
+          # 通知処理
+          # ============================================================
+
+          for station_id, info in results.items():
+
+              previous = state.get(
+                  station_id,
+                  {
+                      "is_raining": False,
+                      "level": 0
+                  }
+              )
+
+              previous_raining = previous.get(
+                  "is_raining",
+                  False
+              )
+
+              previous_level = previous.get(
+                  "level",
+                  0
+              )
+
+              current_raining = info["is_raining"]
+              current_level = info["level"]
+
+              rain_started = (
+                  current_raining
+                  and not previous_raining
+              )
+
+              level_up = (
+                  current_level > previous_level
+              )
+
+              print("")
+              print(
+                  f"{info['name']} 状態確認"
+              )
+
+              print(
+                  f"前回: "
+                  f"雨={'ON' if previous_raining else 'OFF'} "
+                  f"レベル={previous_level}"
+              )
+
+              print(
+                  f"現在: "
+                  f"雨={'ON' if current_raining else 'OFF'} "
+                  f"レベル={current_level}"
+              )
+
+              # ========================================================
+              # 通知メッセージを作る
+              # ========================================================
+
+              message_parts = []
+
+              # --------------------------------------------------------
+              # 雨が降り始めた
+              # --------------------------------------------------------
+
+              if rain_started:
+
+                  message_parts.append(
+                      "☔ 雨の降り始めを検知"
+                  )
+
+                  message_parts.append(
+                      f"{info['name']} "
+                      f"10分間降水量：{info['rain10']:.1f} mm"
+                  )
+
+              # --------------------------------------------------------
+              # 1時間雨量レベル上昇
+              # --------------------------------------------------------
+
+              if level_up:
+
+                  message_parts.append(
+                      info["level_name"]
+                  )
+
+                  message_parts.append(
+                      f"{info['name']} "
+                      f"1時間降水量：{info['rain1h']:.1f} mm"
+                  )
+
+              # ========================================================
+              # 通知が必要な場合
+              # ========================================================
+
+              if message_parts:
+
+                  message_parts.append(
+                      f"観測時刻：{info['time']}"
+                  )
+
+                  message = "\n".join(
+                      message_parts
+                  )
+
+                  print("")
+                  print("Pushover通知:")
+                  print(message)
+
+                  result = subprocess.run(
+                      [
+                          "curl",
+                          "-s",
+                          "--form-string",
+                          f"token={os.environ['PUSHOVER_API_TOKEN']}",
+                          "--form-string",
+                          f"user={os.environ['PUSHOVER_USER_KEY']}",
+                          "--form-string",
+                          "title=牛久・千葉 Rain Combine",
+                          "--form-string",
+                          f"message={message}",
+                          "https://api.pushover.net/1/messages.json"
+                      ],
+                      capture_output=True,
+                      text=True
+                  )
+
+                  print(
+                      "Pushover API:",
+                      result.stdout
+                  )
+
+                  if result.returncode != 0:
+                      raise Exception(
+                          "Pushover送信に失敗しました"
+                      )
+
+                  print(
+                      f"{info['name']} 通知送信成功"
+                  )
+
+              else:
+
+                  print(
+                      f"{info['name']} 通知条件なし"
+                  )
+
+              # ========================================================
+              # 雨が止んだ場合
+              # ========================================================
+
+              if not current_raining and previous_raining:
+
+                  print(
+                      f"{info['name']} "
+                      "10分間降水量が0になりました。"
+                  )
+
+              # ========================================================
+              # 次回用の状態
+              # ========================================================
+
+              new_state[station_id] = {
+                  "is_raining": current_raining,
+                  "level": current_level,
+                  "rain10": info["rain10"],
+                  "rain1h": info["rain1h"],
+                  "time": info["time"]
+              }
+
+          # ============================================================
+          # 状態ファイル保存
+          # ============================================================
+
+          with open(
+              state_file,
+              "w"
+          ) as f:
+
+              json.dump(
+                  new_state,
+                  f,
+                  ensure_ascii=False,
+                  indent=2
+              )
+
+          print("")
+          print("状態ファイルを保存しました")
+
+          # ============================================================
+          # Git設定
+          # ============================================================
+
+          subprocess.run(
+              [
+                  "git",
+                  "config",
+                  "user.name",
+                  "github-actions"
+              ],
+              check=True
+          )
+
+          subprocess.run(
+              [
+                  "git",
+                  "config",
+                  "user.email",
+                  "41898282+github-actions[bot]@users.noreply.github.com"
+              ],
+              check=True
+          )
+
+          # ============================================================
+          # 状態ファイルをコミット
+          # ============================================================
+
+          subprocess.run(
+              [
+                  "git",
+                  "add",
+                  state_file
+              ],
+              check=True
+          )
+
+          result = subprocess.run(
+              [
+                  "git",
+                  "diff",
+                  "--cached",
+                  "--quiet"
+              ]
+          )
+
+          if result.returncode != 0:
+
+              subprocess.run(
+                  [
+                      "git",
+                      "commit",
+                      "-m",
+                      "Update rain combine state"
+                  ],
+                  check=True
+              )
+
+              # --------------------------------------------------------
+              # 他のGitHub Actionsが先にpushしていた場合に備える
+              # --------------------------------------------------------
+
+              print(
+                  "GitHubから最新状態を取得します"
+              )
+
+              subprocess.run(
+                  [
+                      "git",
+                      "pull",
+                      "--rebase",
+                      "origin",
+                      "main"
+                  ],
+                  check=True
+              )
+
+              subprocess.run(
+                  [
+                      "git",
+                      "push",
+                      "origin",
+                      "main"
+                  ],
+                  check=True
+              )
+
+              print(
+                  "雨量状態をGitHubへ保存しました"
+              )
+
+          else:
+
+              print(
+                  "状態変更なし"
+              )
+
+          PY
