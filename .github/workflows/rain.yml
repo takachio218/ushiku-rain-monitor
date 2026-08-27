@@ -1,8 +1,8 @@
 name: 牛久・千葉 雨量監視システム
 
 on:
-  schedule:
-    - cron: '*/10 * * * *'
+  #schedule:
+ #   - cron: '*/10 * * * *'
   workflow_dispatch:
 
 jobs:
