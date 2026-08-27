@@ -1,8 +1,8 @@
 name: 牛久・千葉 微量雨監視
 
 on:
-  schedule:
-    - cron: '*/10 * * * *'
+  #schedule:
+#    - cron: '*/10 * * * *'
   workflow_dispatch:
 
 jobs:
