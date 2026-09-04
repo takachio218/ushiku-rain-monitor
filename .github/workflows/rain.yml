@@ -91,10 +91,10 @@ jobs:
                   level_name = "⚠️ 強い雨"
               elif rain >= 5:
                   level = 2
-                  level_name = "🌧️🌧️ やや強い雨"
+                  level_name = "☔️☔️やや強い雨"
               elif rain >= 1:
                   level = 1
-                  level_name = "🌧️ 雨"
+                  level_name = "☔️ 雨"
               else:
                   level = 0
                   level_name = "雨なし"
