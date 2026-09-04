@@ -54,8 +54,8 @@ jobs:
           rain_index = header.index("現在値(mm)")
 
           stations = {
-              "45291": "牛久",
-              "45212": "千葉"
+              "45291": "【牛久】",
+              "45212": "【千葉】"
           }
 
           results = {}
