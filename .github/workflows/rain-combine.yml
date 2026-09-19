@@ -254,7 +254,8 @@ jobs:
                   station_id,
                   {
                       "is_raining": False,
-                      "level": 0
+                      "level": 0,
+                      "continuous": 0.0
                   }
               )
 
@@ -268,8 +269,29 @@ jobs:
                   0
               )
 
+              previous_continuous = float(
+                  previous.get("continuous", 0.0)
+              )
+
               current_raining = info["is_raining"]
               current_level = info["level"]
+
+              # ========================================================
+              # 連続雨量の計算
+              # ========================================================
+
+              if current_raining:
+                  if previous_raining:
+                      # 継続中 → 前回の連続雨量に今回の10分雨量を加算
+                      continuous = previous_continuous + info["rain10"]
+                  else:
+                      # 降り始め → 今回の10分雨量からスタート
+                      continuous = info["rain10"]
+              else:
+                  # 雨が止んだ → リセット
+                  continuous = 0.0
+
+              continuous = round(continuous, 1)  # 小数点第1位まで
 
               rain_started = (
                   current_raining
@@ -280,6 +302,12 @@ jobs:
                   current_level > previous_level
               )
 
+              # 連続雨量が30mmを超えた（前回未満 → 今回以上）
+              continuous_over_30 = (
+                  continuous >= 30.0
+                  and previous_continuous < 30.0
+              )
+
               print("")
               print(
                   f"{info['name']} 状態確認"
@@ -288,13 +316,15 @@ jobs:
               print(
                   f"前回: "
                   f"雨={'ON' if previous_raining else 'OFF'} "
-                  f"レベル={previous_level}"
+                  f"レベル={previous_level} "
+                  f"連続雨量={previous_continuous:.1f}mm"
               )
 
               print(
                   f"現在: "
                   f"雨={'ON' if current_raining else 'OFF'} "
-                  f"レベル={current_level}"
+                  f"レベル={current_level} "
+                  f"連続雨量={continuous:.1f}mm"
               )
 
               # ========================================================
@@ -331,6 +361,21 @@ jobs:
                   message_parts.append(
                       f"{info['name']} "
                       f"1時間降水量：{info['rain1h']:.1f} mm"
+                  )
+
+              # --------------------------------------------------------
+              # 連続雨量が30mmを超えた
+              # --------------------------------------------------------
+
+              if continuous_over_30:
+
+                  message_parts.append(
+                      "⚠️ 連続雨量が30mmを超えました"
+                  )
+
+                  message_parts.append(
+                      f"{info['name']} "
+                      f"連続降水量：{continuous:.1f} mm"
                   )
 
               # ========================================================
@@ -398,6 +443,7 @@ jobs:
                   print(
                       f"{info['name']} "
                       "10分間降水量が0になりました。"
+                      f"（連続雨量リセット: {previous_continuous:.1f}mm → 0.0mm）"
                   )
 
               # ========================================================
@@ -407,6 +453,7 @@ jobs:
               new_state[station_id] = {
                   "is_raining": current_raining,
                   "level": current_level,
+                  "continuous": continuous,
                   "rain10": info["rain10"],
                   "rain1h": info["rain1h"],
                   "time": info["time"]
@@ -529,3 +576,4 @@ jobs:
               )
 
           PY
+  
