@@ -4,15 +4,15 @@
     "level": 2,
     "continuous": 0.0,
     "rain10": 0.0,
-    "rain1h": 8.5,
-    "time": "2026/09/21 07:00"
+    "rain1h": 6.0,
+    "time": "2026/09/21 07:10"
   },
   "45212": {
     "is_raining": true,
     "level": 3,
-    "continuous": 27.5,
-    "rain10": 4.5,
-    "rain1h": 22.0,
-    "time": "2026/09/21 07:00"
+    "continuous": 29.0,
+    "rain10": 1.5,
+    "rain1h": 22.5,
+    "time": "2026/09/21 07:10"
   }
 }
