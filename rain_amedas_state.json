@@ -2,17 +2,17 @@
   "45291": {
     "is_raining": true,
     "level": 4,
-    "continuous": 116.5,
-    "rain10": 4.5,
-    "rain1h": 39.0,
-    "time": "2026/09/21 19:10"
+    "continuous": 127.5,
+    "rain10": 11.0,
+    "rain1h": 43.5,
+    "time": "2026/09/21 19:20"
   },
   "45212": {
     "is_raining": true,
     "level": 3,
-    "continuous": 185.5,
-    "rain10": 4.0,
-    "rain1h": 23.5,
-    "time": "2026/09/21 19:10"
+    "continuous": 188.0,
+    "rain10": 2.5,
+    "rain1h": 22.0,
+    "time": "2026/09/21 19:20"
   }
 }
