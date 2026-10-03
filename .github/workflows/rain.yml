@@ -1,5 +1,5 @@
 # schedule wake-up 2026-09-21
-name: 牛久・千葉 雨量監視システム（AMeDAS累積対応）
+name: 千葉・牛久 雨量監視システム（AMeDAS累積対応）
 
 on:
   schedule:
