@@ -5,14 +5,14 @@
     "continuous": 0.0,
     "rain10": 0.0,
     "rain1h": 0.0,
-    "time": "2026/10/25 11:00"
+    "time": "2026/10/25 11:10"
   },
   "45212": {
-    "is_raining": false,
-    "level": 0,
-    "continuous": 0.0,
-    "rain10": 0.0,
-    "rain1h": 0.0,
-    "time": "2026/10/25 11:00"
+    "is_raining": true,
+    "level": 1,
+    "continuous": 2.0,
+    "rain10": 2.0,
+    "rain1h": 2.0,
+    "time": "2026/10/25 11:10"
   }
 }
