@@ -2,7 +2,7 @@
   "45291": {
     "is_raining": true,
     "level": 1,
-    "continuous": 1.0,
+    "continuous": 2.0,
     "rain10": 1.0,
     "rain1h": 1.0,
     "time": "2026/11/18 03:20"
